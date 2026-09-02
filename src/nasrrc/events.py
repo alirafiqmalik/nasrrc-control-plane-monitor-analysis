@@ -49,7 +49,7 @@ def classify_summary_line(line: str) -> Event | None:
     frame_s, t_s, protocol, info = parts
     if protocol.startswith("LTE RRC PCCH"):
         return None
-    kind = _kind_for(info)
+    kind = kind_for_info(info)
     if kind is None:
         return None
     try:
@@ -73,7 +73,8 @@ def classify_summary_lines(lines: Iterable[str]) -> list[Event]:
     return events
 
 
-def _kind_for(info: str) -> str | None:
+def kind_for_info(info: str) -> str | None:
+    """First matching rule for a tshark Info string (or any label that quotes one)."""
     for kind, needle in _RULES:
         if needle in info:
             return kind

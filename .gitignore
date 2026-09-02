@@ -14,3 +14,7 @@ dist/
 *.qmdl
 out/
 /captures/
+
+# The synthetic fixture is hand-encoded, holds no subscriber data, and the tests
+# need it. Regenerate with fixtures/synthetic-lte/make_pcap.py.
+!fixtures/synthetic-lte/*.pcap
