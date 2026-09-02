@@ -33,8 +33,22 @@ HOST="${GSMTAP_HOST:-127.0.0.1}"
 PORT="${GSMTAP_PORT:-4729}"
 LAYERS="${LAYERS:-nas,rrc}"
 FIFO="${FIFO:-/tmp/nasrrc-live.sdm}"
+# Measured rotation interval on this Pixel is ~9 s, with bursts 5.5-6.6 s apart.
+POLL_SECS="${POLL_SECS:-2}"
+# Let the rotated ring drain to EOF before detaching from it.
+DRAIN_SECS="${DRAIN_SECS:-2}"
+# A quiet radio looks exactly like a stalled ring, so wait out several rotation
+# intervals before concluding dmd has stopped writing.
+STALL_POLLS="${STALL_POLLS:-15}"
+# The logger tolerates about one session per boot; asking it to restart forever
+# wedges it for the rest of the boot, so give up after a few attempts.
+FLUSH_LIMIT="${FLUSH_LIMIT:-3}"
 SCAT_PID=""
 TAIL_PID=""
+FOLLOW_PID=""
+# stream_rings runs as a subshell, so its `adb exec-out` pid has to travel back
+# to cleanup through the filesystem rather than through a variable.
+FOLLOW_PID_FILE="${TMPDIR:-/tmp}/nasrrc-live.$$.follow"
 
 latest_ring() {
   adb_su "ls -1t /data/vendor/radio/logs/always-on/sbuff_[0-9]*.sdm /data/vendor/slog/sbuff_[0-9]*.sdm 2>/dev/null | head -1"
@@ -44,37 +58,103 @@ ring_size() {
   adb_su "stat -c %s '$1'"
 }
 
+# Kill every remote tail this tool leaves behind. Closing `adb exec-out` locally
+# does not reach the on-device process, so it has to be reaped by name.
+#
+# The pattern carries no spaces and no quotes on purpose. `adb_su` wraps its
+# argument in single quotes, so a quoted pattern collapses into `pkill -f tail`
+# on the device — which would match every unrelated `tail` there. Each `.` here
+# stands for one literal character of `tail -c +1 -f /data/vendor/`.
+reap_remote_tails() {
+  adb_su "pkill -f tail.-c..1.-f./data/vendor/" >/dev/null 2>&1 || true
+}
+
+# Reattach across dmd session rotation. `tail -f` never returns on a ring that
+# stopped growing, so it runs in the background and is replaced when a newer
+# timestamped session appears. The new ring is read from byte 0, so the bytes
+# written between the rotation and the poll are not lost.
 stream_rings() {
+  local current=""
   local ring="$1"
-  local last_name=""
-  local name
+  local stalled=0
+  local flushes=0
+  local next
+  local size=""
+  local next_size
+
+  # This runs as a subshell, so it owns the teardown of its own remote tail.
+  trap 'kill "$FOLLOW_PID" 2>/dev/null || true; exit 0' TERM INT
 
   while true; do
-    name="${ring##*/}"
-    if [[ "$name" != "$last_name" ]]; then
-      last_name="$name"
-      adb exec-out "su -c 'tail -c +1 -f $ring'" || true
-    else
-      adb_su "start modem_logging_start" || true
+    # Ring names sort by session time, so a plain string compare keeps the
+    # follower monotone. `ls -1t` orders by mtime, and a ring still being
+    # flushed can outrank the newer session that replaced it — reattaching
+    # backwards would replay its whole multi-MB history as fresh GSMTAP.
+    if [[ "${ring##*/}" > "${current##*/}" ]]; then
+      if [[ -n "$FOLLOW_PID" ]]; then
+        sleep "$DRAIN_SECS"
+        kill "$FOLLOW_PID" 2>/dev/null || true
+        wait "$FOLLOW_PID" 2>/dev/null || true
+        reap_remote_tails
+      fi
+      current="$ring"
+      size=""
+      adb exec-out "su -c 'tail -c +1 -f $current'" &
+      FOLLOW_PID=$!
+      echo "$FOLLOW_PID" > "$FOLLOW_PID_FILE"
+      stalled=0
     fi
-    sleep 1
-    ring="$(latest_ring || true)"
-    [[ -n "$ring" ]] || continue
+
+    sleep "$POLL_SECS"
+    next="$(latest_ring || true)"
+    [[ -n "$next" ]] || continue
+    next_size="$(ring_size "$next" 2>/dev/null || true)"
+
+    if [[ -n "$next_size" && "${next##*/}" == "${current##*/}" && "$next_size" == "$size" ]]; then
+      # Same session, readable, and not being written to.
+      stalled=$(( stalled + 1 ))
+      if (( stalled >= STALL_POLLS )); then
+        if (( flushes < FLUSH_LIMIT )); then
+          adb_su "start modem_logging_start" >/dev/null 2>&1 || true
+          flushes=$(( flushes + 1 ))
+        elif (( flushes == FLUSH_LIMIT )); then
+          echo "[*] ring stalled and dmd will not restart — reboot to log again" >&2
+          flushes=$(( flushes + 1 ))
+        fi
+        stalled=0
+      fi
+    else
+      stalled=0
+    fi
+    size="$next_size"
+    ring="$next"
   done
 }
 
+# Restore logging first, then tear down. A second Ctrl-C used to land in the
+# grace period and kill the script with logging still enabled on the device, so
+# interrupts are ignored for the rest of teardown.
 cleanup() {
   local status=$?
-  trap - EXIT INT TERM
-  if [[ -n "$SCAT_PID" || -n "$TAIL_PID" ]]; then
-    [[ -z "$SCAT_PID" ]] || kill "$SCAT_PID" 2>/dev/null || true
-    [[ -z "$TAIL_PID" ]] || kill "$TAIL_PID" 2>/dev/null || true
-    [[ -z "$SCAT_PID" ]] || wait "$SCAT_PID" 2>/dev/null || true
-    [[ -z "$TAIL_PID" ]] || wait "$TAIL_PID" 2>/dev/null || true
-  fi
+  local pid
+  trap '' INT TERM
+  trap - EXIT
   echo "[*] stop — restoring logging"
   disable_modem_logging
-  rm -f "$FIFO"
+  # stream_rings only sees TERM once its `sleep` returns, which can outlast the
+  # grace below, so the follower is killed here by the pid it recorded.
+  FOLLOW_PID="$(cat "$FOLLOW_PID_FILE" 2>/dev/null || true)"
+  for pid in "$TAIL_PID" "$FOLLOW_PID" "$SCAT_PID"; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+  done
+  sleep 1
+  for pid in "$TAIL_PID" "$FOLLOW_PID" "$SCAT_PID"; do
+    [[ -n "$pid" ]] || continue
+    kill -9 "$pid" 2>/dev/null || true
+  done
+  reap_remote_tails
+  rm -f "$FIFO" "$FOLLOW_PID_FILE"
   exit "$status"
 }
 trap cleanup EXIT
@@ -82,19 +162,23 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 echo "[*] enabling modem logging (dmd keeps /dev/umts_dm0)"
+reap_remote_tails
 enable_modem_logging
 
 SBUFF="$(latest_ring)"
 [ -n "$SBUFF" ] || { echo "no sbuff_*.sdm yet — enable Verbose Vendor Logging?" >&2; exit 1; }
 SBUFF_SIZE="$(ring_size "$SBUFF")"
+# Logging is live if the ring grows, or if dmd opens a newer session — under a
+# short rotation interval the ring is replaced before it is ever seen to grow.
 RING_GROWING=0
 for _ in {1..10}; do
   sleep 1
   CANDIDATE="$(latest_ring)"
   [[ -n "$CANDIDATE" ]] || continue
   CANDIDATE_SIZE="$(ring_size "$CANDIDATE")"
-  if [[ "$CANDIDATE" == "$SBUFF" ]] && (( CANDIDATE_SIZE > SBUFF_SIZE )); then
+  if [[ "${CANDIDATE##*/}" != "${SBUFF##*/}" ]] || (( CANDIDATE_SIZE > SBUFF_SIZE )); then
     RING_GROWING=1
+    SBUFF="$CANDIDATE"
     break
   fi
   SBUFF="$CANDIDATE"
@@ -110,7 +194,7 @@ rm -f "$FIFO"
 mkfifo "$FIFO"
 
 echo "[*] live GSMTAP $HOST:$PORT  (stop: Ctrl-C)"
-echo "    tshark -i lo -f 'udp port $PORT and dst host $HOST' -Y 'lte_rrc || nas-eps || nr-rrc || nas-5gs'"
+echo "    tshark -i lo -f 'udp port $PORT and dst host $HOST' -Y 'gsmtap || lte_rrc || nas-eps || nr-rrc || nas-5gs'"
 
 scat_cmd -t sec -d "$FIFO" -L "$LAYERS" -H "$HOST" -P "$PORT" &
 SCAT_PID=$!
