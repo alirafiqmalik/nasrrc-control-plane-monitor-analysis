@@ -138,16 +138,12 @@ stream_rings() {
 
     sleep "$POLL_SECS"
 
-    # `tail -f` never returns on its own, so a dead follower means something
-    # outside this script killed it — another instance's startup sweep, most
-    # likely. Reattaching is noisy; going quiet with no error is worse.
-    if [[ -n "$FOLLOW_PID" ]] && ! kill -0 "$FOLLOW_PID" 2>/dev/null; then
-      echo "[*] remote tail died — reattaching to the newest ring" >&2
-      wait "$FOLLOW_PID" 2>/dev/null || true
-      FOLLOW_PID=""
-      current=""
-    fi
-
+    # No watchdog on the remote tail. Measured on the device 2026-09-02: killing
+    # it leaves the `sh -c su -c ...` wrapper alive, so the host `adb exec-out`
+    # survives and a host-side liveness check never fires; and a device-side
+    # `pgrep -f` self-matches its own wrapper, so it always reports a hit. The
+    # stream recovers on its own at the next rotation, which cost one rotation
+    # interval (~30 s) in that test.
     next="$(latest_ring || true)"
     [[ -n "$next" ]] || continue
     next_size="$(ring_size "$next" 2>/dev/null || true)"

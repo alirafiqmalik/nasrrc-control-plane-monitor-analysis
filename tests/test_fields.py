@@ -71,6 +71,50 @@ RETUNE_PDML = """<?xml version="1.0"?>
 """
 
 
+# Trimmed from a real EN-DC report off the Pixel 7a (2026-09-02). NR spells the
+# quantities measQuantityResults.rsrp and repeats the serving cell once per
+# measurement object, each tagged with its own servCellId.
+NR_SERVING_PDML = """<?xml version="1.0"?>
+<pdml>
+<packet>
+  <proto name="frame">
+    <field name="frame.number" show="17"/>
+    <field name="frame.time_relative" show="15.397000000"/>
+  </proto>
+  <proto name="nr-rrc">
+    <field name="nr-rrc.UL_DCCH_Message_element" showname="UL-DCCH-Message">
+      <field name="nr-rrc.c1" showname="c1: measurementReport (0)">
+        <field name="nr-rrc.measResults_element" showname="measResults">
+          <field name="nr-rrc.measId" show="15"/>
+          <field name="nr-rrc.measResultServingMOList" showname="measResultServingMOList: 2 items">
+            <field name="nr-rrc.MeasResultServMO_element" showname="MeasResultServMO">
+              <field name="nr-rrc.servCellId" show="7"/>
+              <field name="nr-rrc.measResultServingCell_element" showname="measResultServingCell">
+                <field name="nr-rrc.physCellId" show="799"/>
+                <field name="nr-rrc.measQuantityResults.rsrp" show="43"/>
+                <field name="nr-rrc.measQuantityResults.rsrq" show="63"/>
+                <field name="nr-rrc.measQuantityResults.sinr" show="64"/>
+              </field>
+            </field>
+            <field name="nr-rrc.MeasResultServMO_element" showname="MeasResultServMO">
+              <field name="nr-rrc.servCellId" show="8"/>
+              <field name="nr-rrc.measResultServingCell_element" showname="measResultServingCell">
+                <field name="nr-rrc.physCellId" show="799"/>
+                <field name="nr-rrc.measQuantityResults.rsrp" show="39"/>
+                <field name="nr-rrc.measQuantityResults.rsrq" show="63"/>
+                <field name="nr-rrc.measQuantityResults.sinr" show="59"/>
+              </field>
+            </field>
+          </field>
+        </field>
+      </field>
+    </field>
+  </proto>
+</packet>
+</pdml>
+"""
+
+
 def _events(pcap=PCAP):
     return list(analyze_pcap(pcap))
 
@@ -130,6 +174,18 @@ class PdmlTests(unittest.TestCase):
         analyzer = Analyzer()
         list(analyze_pdml([RETUNE_PDML], analyzer))
         self.assertEqual(analyzer.triggers_by_meas_id, {1: "a5"})
+
+
+class NrTests(unittest.TestCase):
+    def test_every_serving_measurement_object_is_reported(self) -> None:
+        (ev,) = list(analyze_pdml([NR_SERVING_PDML]))
+        self.assertEqual((ev.rat, ev.kind, ev.meas_id), ("nr", "measurement_report", 15))
+        first, second = ev.cells
+        # Wireshark labels these -114dBm, -12.0dB, 8.5dB and -118dBm, 6.0dB.
+        self.assertEqual((first.serv_cell_id, first.pci), (7, 799))
+        self.assertEqual((first.rsrp_dbm, first.rsrq_db, first.sinr_db), (-114.0, -12.0, 8.5))
+        self.assertEqual((second.serv_cell_id, second.pci), (8, 799))
+        self.assertEqual((second.rsrp_dbm, second.sinr_db), (-118.0, 6.0))
 
 
 class ConversionTests(unittest.TestCase):

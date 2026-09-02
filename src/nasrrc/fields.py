@@ -72,6 +72,7 @@ class CellMeasurement:
 
     role: str
     pci: int | None = None
+    serv_cell_id: int | None = None
     rsrp: int | None = None
     rsrq: int | None = None
     sinr: int | None = None
@@ -81,6 +82,8 @@ class CellMeasurement:
 
     def describe(self) -> str:
         parts = [self.role if self.pci is None else f"{self.role}=pci{self.pci}"]
+        if self.serv_cell_id is not None:
+            parts.append(f"servCell={self.serv_cell_id}")
         if self.rsrp_dbm is not None:
             parts.append(f"rsrp={self.rsrp_dbm:g}dBm")
         if self.rsrq_db is not None:
@@ -325,9 +328,17 @@ class Analyzer:
         cells: list[CellMeasurement] = []
         # The serving cell has its own field name in both RATs (measResultPCell,
         # measResultServingCell); only list items carry the bare element name.
-        serving = _first(results, _SERVING_CELL)
-        if serving is not None:
-            cells.append(_cell(serving, "serving", rat))
+        # NR wraps each serving entry in a MeasResultServMO carrying servCellId —
+        # an EN-DC report has one per measurement object. LTE has a single
+        # measResultPCell with no such wrapper.
+        for mo in _all(results, ("MeasResultServMO_element",)):
+            serving = _first(mo, _SERVING_CELL)
+            if serving is not None:
+                cells.append(_cell(serving, "serving", rat, _int(mo, ("servCellId",))))
+        if not cells:
+            serving = _first(results, _SERVING_CELL)
+            if serving is not None:
+                cells.append(_cell(serving, "serving", rat))
         for neighbour in _all(results, _NEIGHBOUR_CELL):
             cells.append(_cell(neighbour, "neighbour", rat))
         return FieldEvent(
@@ -348,14 +359,15 @@ def _target_pci(marker: ET.Element) -> int | None:
     return _int(marker, _PCI_FIELDS) if target is None else target
 
 
-def _cell(node: ET.Element, role: str, rat: str) -> CellMeasurement:
-    rsrp = _int(node, ("rsrpResult", "rsrp_Result", "rsrpResult_r15"))
-    rsrq = _int(node, ("rsrqResult", "rsrq_Result", "rsrqResult_r15"))
-    sinr = _int(node, ("sinr_Result",))
+def _cell(node: ET.Element, role: str, rat: str, serv_cell_id: int | None = None) -> CellMeasurement:
+    rsrp = _int(node, ("rsrpResult", "rsrp_Result", "rsrpResult_r15", "rsrp"))
+    rsrq = _int(node, ("rsrqResult", "rsrq_Result", "rsrqResult_r15", "rsrq"))
+    sinr = _int(node, ("sinr_Result", "sinr"))
     if rat == "nr":
         return CellMeasurement(
             role=role,
             pci=_int(node, _PCI_FIELDS),
+            serv_cell_id=serv_cell_id,
             rsrp=rsrp,
             rsrq=rsrq,
             sinr=sinr,

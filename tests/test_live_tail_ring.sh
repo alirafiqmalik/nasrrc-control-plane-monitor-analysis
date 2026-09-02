@@ -84,9 +84,6 @@ wait_for() { # pattern file timeout_deciseconds
   return 1
 }
 
-count_in() { grep -c "$1" "$2" 2>/dev/null || echo 0; }
-
-
 # --- follows a rotation, restores logging, reaps with a quote-safe pattern ----
 setup rotation
 run_script env
@@ -128,23 +125,8 @@ wait_for RINGAAA "$SCAT_OUT" 200 || fail "a failed stat during the startup probe
 stop_script
 
 
-# --- reattaches when something else kills the remote tail --------------------
-setup tail-killed
-run_script env
-wait_for RINGAAA "$SCAT_OUT" 100 || fail "first ring never reached the FIFO"
-FOLLOWER="$(cat "$TMP"/nasrrc-live.*.follow 2>/dev/null || true)"
-[[ -n "$FOLLOWER" ]] || fail "follower pid was never published"
-kill "$FOLLOWER" 2>/dev/null
-wait_for 'remote tail died' "$TMP/live.log" 100 \
-  || fail "a killed remote tail went unnoticed; the stream would just go quiet"
-if ! wait_for RINGAAA.\*RINGAAA "$SCAT_OUT" 100 && (( $(count_in RINGAAA "$SCAT_OUT") < 2 )); then
-  fail "did not reattach after the remote tail was killed"
-fi
-stop_script
-
-
 if (( FAILURES )); then
   echo "$FAILURES scenario(s) failed" >&2
   exit 1
 fi
-echo "PASS: rotation, missing ring, racing stat, killed tail"
+echo "PASS: rotation, missing ring, racing stat"

@@ -39,6 +39,19 @@ The live demo cannot run on this host. `/usr/bin/dumpcap` is `root:wireshark` 07
 
 Frames 5, 6 and 7 are reconfigurations and stay `rrc_reconfiguration`; only frame 11 carries `mobilityControlInfo` and only it is called a handover. `Analyzer` holds the measId → event map across packets, so frame 9 is labelled `a3` from what frame 5 configured, and `measIdToRemoveList` drops the entry again. NAS keeps working through the same consumer: the analyzer feeds the dissected EMM/ESM message type into `nasrrc.events.kind_for_info`, the same rules the summary classifier uses, so attach, TAU and identity land on the same kind strings either way. `--json` prints one object per event. Broadcast and paging are dropped, as in the summary classifier.
 
-Two limits worth knowing. NR is written but unproven: the field names (`reconfigurationWithSync`, `nr-rrc.measId`, `rsrp-Result`) and the 38.133 conversions are in place, but this Wireshark shows NR as `Unknown GSMTAP version (3)` and never dissects it, so no NR frame has been through the code. And `--analyze` has only been exercised on its FIFO half, with the synthetic pcap standing in for SCAT; no `.sdm` is on this host to drive the SCAT half.
+### Device run, 2026-09-02
 
-Both real ticket-01 captures behave as expected: `lte-mib-and-nr.pcap` yields nothing because MIB is broadcast, and `proof-session.pcap` yields nothing because it is GSMTAPv3.
+Run on the Pixel 7a, both paths. `live_replay_sdm.sh --analyze` against a 52 MB ring pulled off the phone, and `live_tail_ring.sh` live for nine minutes with a plain UDP socket on `127.0.0.1:4729` standing in for tshark, which cannot capture on this host.
+
+425 GSMTAP packets, 81 events: 63 measurement reports, 9 reconfigurations, 9 completes, zero handovers — right for a stationary UE. The correlation this ticket exists for works against a live network:
+
+```
+    59  49.383299  rrc_reconfiguration  lte  configures measId26=a1,measId27=a2,measId28=a5,measId29=a5
+    63  53.400818  measurement_report   nr   measId=26 trigger=a1 | serving=pci799 servCell=7 rsrp=-112dBm rsrq=-11.5dB sinr=10.5dB | serving=pci799 servCell=8 rsrp=-119dBm rsrq=-12dB sinr=6dB
+```
+
+The network re-issues that NR config about once a minute and the next report comes back tagged. LTE `measId=5` was configured before the capture opened and correctly carries no trigger.
+
+Three things the device corrected. NR was not unproven after all — this Wireshark dissects the NR RRC SCAT emits in a normal session, and only the ticket-01 proof ring was v3. A real EN-DC report carries two `MeasResultServMO` entries for the same PSCell, so the analyzer reports every serving MO tagged with its servCellId instead of the first. And NR spells the quantities `measQuantityResults.rsrp` / `.rsrq` / `.sinr`, not `rsrp-Result`; with that fixed the 38.133 conversions match Wireshark's own labels exactly (rsrp 43 → -114 dBm, rsrq 63 → -12.0 dB, sinr 64 → 8.5 dB), and the LTE conversion agrees with SCAT's PHY log for the same serving cell.
+
+Still open: no handover has been captured, because the UE has not moved. `mobilityControlInfo` and `reconfigurationWithSync` remain exercised only against the synthetic fixture.

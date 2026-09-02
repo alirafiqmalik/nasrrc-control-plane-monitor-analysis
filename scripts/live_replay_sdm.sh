@@ -35,7 +35,8 @@ if [[ "$ANALYZE" == 1 ]]; then
   echo "[*] replaying $SDM into the analyzer (layers=$LAYERS)" >&2
   # SCAT writes a pcap stream into the FIFO; tshark reads it with -r, so no
   # dumpcap and no capture permission are involved.
-  scat_cmd -t sec -d "$SDM" -L "$LAYERS" -F "$FIFO" &
+  # SCAT's own decode chatter goes to stderr; stdout belongs to the events.
+  scat_cmd -t sec -d "$SDM" -L "$LAYERS" -F "$FIFO" >&2 &
   scat_pid=$!
   "$PY" -m nasrrc --fields "$FIFO"
   # SCAT dies on SIGPIPE once the analyzer stops reading; that is a normal end.
