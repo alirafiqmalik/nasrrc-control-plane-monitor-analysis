@@ -44,6 +44,23 @@ ring_size() {
   adb_su "stat -c %s '$1'"
 }
 
+stream_rings() {
+  local ring="$1"
+  local last_name=""
+  local name
+
+  while true; do
+    name="${ring##*/}"
+    if [[ "$name" != "$last_name" ]]; then
+      last_name="$name"
+      adb exec-out "su -c 'tail -c +1 -f $ring'" || true
+    fi
+    sleep 1
+    ring="$(latest_ring || true)"
+    [[ -n "$ring" ]] || continue
+  done
+}
+
 cleanup() {
   local status=$?
   trap - EXIT INT TERM
@@ -95,7 +112,7 @@ echo "    tshark -i lo -f 'udp port $PORT' -Y 'lte_rrc || nas-eps || nr-rrc || n
 
 scat_cmd -t sec -d "$FIFO" -L "$LAYERS" -H "$HOST" -P "$PORT" &
 SCAT_PID=$!
-adb exec-out "su -c 'tail -c +1 -f $SBUFF'" > "$FIFO" &
+stream_rings "$SBUFF" > "$FIFO" &
 TAIL_PID=$!
 
 if [[ "$AIRPLANE" -eq 1 ]]; then
