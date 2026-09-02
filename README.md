@@ -32,7 +32,7 @@ Add `--json` for one JSON object per event, `--kinds` for counts. Live capture o
 an interface goes through `dumpcap`, so it needs capture rights; reading a pcap or
 a FIFO does not, which is why `--analyze` replays through a FIFO.
 
-Use `.venv/bin/python` for `nasrrc` and SCAT. Snapshot a dump with `scripts/capture_nas_rrc.sh [outdir] [--airplane]`, then `scripts/decode_nas_rrc.sh`. Classify from a summary: `.venv/bin/python -m nasrrc --kinds fixtures/example-lte/LTE_full_summary.txt`.
+Use `.venv/bin/python` for `nasrrc` and SCAT. Snapshot a dump with `scripts/capture_nas_rrc.sh [outdir] [--airplane]`, then `scripts/decode_nas_rrc.sh`. Print a saved pcap as text with `scripts/dump_pcap.sh` (defaults to `captures/`). Classify from a summary: `.venv/bin/python -m nasrrc --kinds fixtures/example-lte/LTE_full_summary.txt`.
 
 The phone allows about one logging session per boot: once the script has stopped and restored logging, a second run needs a reboot first.
 
