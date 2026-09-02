@@ -37,6 +37,40 @@ PLAIN_RECONFIG_PDML = """<?xml version="1.0"?>
 """
 
 
+# 36.331 applies measIdToRemoveList before measIdToAddModList, so this message
+# retunes measId 1 rather than deleting it.
+RETUNE_PDML = """<?xml version="1.0"?>
+<pdml>
+<packet>
+  <proto name="frame">
+    <field name="frame.number" show="3"/>
+    <field name="frame.time_relative" show="0.500000000"/>
+  </proto>
+  <proto name="lte_rrc">
+    <field name="lte-rrc.DL_DCCH_Message_element" showname="DL-DCCH-Message">
+      <field name="lte-rrc.c1" showname="c1: rrcConnectionReconfiguration (4)">
+        <field name="lte-rrc.measConfig_element" showname="measConfig">
+          <field name="lte-rrc.measIdToRemoveList" showname="measIdToRemoveList: 1 item">
+            <field name="lte-rrc.measId" show="1"/>
+          </field>
+          <field name="lte-rrc.ReportConfigToAddMod_element" showname="ReportConfigToAddMod">
+            <field name="lte-rrc.reportConfigId" show="4"/>
+            <field name="lte-rrc.eventA5_element" showname="eventA5"/>
+          </field>
+          <field name="lte-rrc.MeasIdToAddMod_element" showname="MeasIdToAddMod">
+            <field name="lte-rrc.measId" show="1"/>
+            <field name="lte-rrc.measObjectId" show="1"/>
+            <field name="lte-rrc.reportConfigId" show="4"/>
+          </field>
+        </field>
+      </field>
+    </field>
+  </proto>
+</packet>
+</pdml>
+"""
+
+
 def _events(pcap=PCAP):
     return list(analyze_pcap(pcap))
 
@@ -91,6 +125,11 @@ class PdmlTests(unittest.TestCase):
     def test_unknown_meas_id_has_no_trigger(self) -> None:
         analyzer = Analyzer()
         self.assertEqual(analyzer.triggers_by_meas_id, {})
+
+    def test_remove_then_add_in_one_message_keeps_the_new_trigger(self) -> None:
+        analyzer = Analyzer()
+        list(analyze_pdml([RETUNE_PDML], analyzer))
+        self.assertEqual(analyzer.triggers_by_meas_id, {1: "a5"})
 
 
 class ConversionTests(unittest.TestCase):

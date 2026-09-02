@@ -198,7 +198,7 @@ def _all(root: ET.Element, suffixes: tuple[str, ...]) -> list[ET.Element]:
 def _int(root: ET.Element | None, suffixes: tuple[str, ...]) -> int | None:
     if root is None:
         return None
-    node = _first(root, suffixes)
+    node = root if not suffixes else _first(root, suffixes)
     if node is None:
         return None
     show = node.get("show", "")
@@ -218,7 +218,11 @@ def pdml_packets(chunks: Iterable[str]) -> Iterator[ET.Element]:
             if element.tag == "packet":
                 yield element
                 element.clear()
-    parser.close()
+    try:
+        parser.close()
+    except ET.ParseError:
+        # tshark died without closing </pdml>. Whatever arrived has been yielded.
+        return
     for _, element in parser.read_events():
         if element.tag == "packet":
             yield element
@@ -269,8 +273,6 @@ class Analyzer:
             kind = "handover"
         if kind in ("handover", "inter_rat_handover"):
             marker = _first(root, _HANDOVER_MARKERS)
-            if marker is None:
-                marker = root
             return FieldEvent(
                 frame=frame_number,
                 t_rel=t_rel,
@@ -278,8 +280,8 @@ class Analyzer:
                 rat=rat,
                 kind=kind,
                 message=message,
-                target_pci=_target_pci(marker),
-                target_freq=_int(marker, _TARGET_FREQ_FIELDS),
+                target_pci=None if marker is None else _target_pci(marker),
+                target_freq=None if marker is None else _int(marker, _TARGET_FREQ_FIELDS),
                 meas_config=meas_config,
             )
         return FieldEvent(
@@ -299,6 +301,13 @@ class Analyzer:
             trigger = _trigger_name(node)
             if report_config_id is not None and trigger is not None:
                 self._triggers_by_report_config[report_config_id] = trigger
+        # 36.331 applies the remove list before the add list, so a single message
+        # can retune a measId onto a different reportConfig.
+        for removal in _all(root, ("measIdToRemoveList",)):
+            for node in _all(removal, ("measId", "MeasId")):
+                removed = _int(node, ())
+                if removed is not None:
+                    self.triggers_by_meas_id.pop(removed, None)
         for node in _all(root, ("MeasIdToAddMod_element",)):
             meas_id = _int(node, ("measId",))
             report_config_id = _int(node, ("reportConfigId",))
@@ -306,12 +315,6 @@ class Analyzer:
             if meas_id is not None and trigger is not None:
                 self.triggers_by_meas_id[meas_id] = trigger
                 learned.append((meas_id, trigger))
-        for removal in _all(root, ("measIdToRemoveList",)):
-            for meas_id in _all(removal, ("measId", "MeasId")):
-                try:
-                    self.triggers_by_meas_id.pop(int(meas_id.get("show", ""), 0), None)
-                except ValueError:
-                    continue
         return tuple(learned)
 
     def _measurement_event(self, frame_number, t_rel, proto, rat, message, root) -> FieldEvent:
@@ -422,10 +425,17 @@ def _packet_frame(packet: ET.Element) -> tuple[int, float] | None:
 
 
 def _innermost_signalling_proto(packet: ET.Element) -> tuple[str, ET.Element | None]:
-    """The last signalling protocol in the packet, plus its subtree."""
+    """The last signalling protocol in the packet, plus its subtree.
+
+    PDML nests a protocol that was dissected out of another one — NAS inside an
+    RRC `dedicatedInfoNAS`, say — so the search runs over the whole tree. Each
+    protocol also repeats itself as an empty `hide="yes"` node, which is skipped.
+    """
     found: tuple[str, ET.Element | None] = ("", None)
-    for node in packet:
-        if node.tag == "proto" and _name(node) in _RAT_BY_PROTO:
+    for node in _descendants(packet):
+        if node.tag != "proto" or node.get("hide") == "yes":
+            continue
+        if _name(node) in _RAT_BY_PROTO:
             found = (_name(node), node)
     return found
 
@@ -487,22 +497,29 @@ def _run(argv: list[str]) -> Iterator[FieldEvent]:
     assert proc.stdout is not None
     try:
         yield from analyze_pdml(proc.stdout)
-    finally:
+    except BaseException:
+        # The consumer stopped early, so tshark's own exit status is not ours to judge.
         _reap(proc)
+        raise
+    status = _reap(proc)
+    if status:
+        # Otherwise a capture that never started looks exactly like a quiet radio.
+        raise RuntimeError(f"{argv[0]} exited {status}; see its message above")
 
 
-def _reap(proc: subprocess.Popen) -> None:
+def _reap(proc: subprocess.Popen) -> int | None:
     """Stop tshark even when the consumer walked away mid-stream.
 
-    Closing the read end first matters: a tshark blocked writing into a full pipe
-    never reaches its own signal handler, so terminate() alone hangs here.
+    The read end closes first: a tshark blocked writing into a full pipe never
+    reaches its own signal handler, so terminate() alone would hang here.
     """
-    if proc.poll() is None:
-        proc.terminate()
     if proc.stdout is not None:
         proc.stdout.close()
+    if proc.poll() is None:
+        proc.terminate()
     try:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+    return proc.returncode

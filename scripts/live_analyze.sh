@@ -22,7 +22,10 @@ PORT="${GSMTAP_PORT:-4729}"
 need_cmd tshark
 PY="$(scat_python)"
 
-if [[ -e "$SOURCE" ]]; then
+# Only a path-shaped argument reads a file, so a stray ./lo in the working
+# directory cannot turn an interface name into a capture file.
+if [[ "$SOURCE" == */* || "$SOURCE" == *.pcap || "$SOURCE" == *.pcapng ]]; then
+  [[ -e "$SOURCE" ]] || { echo "not found: $SOURCE" >&2; exit 1; }
   echo "[*] analyzing $SOURCE" >&2
   exec "$PY" -m nasrrc --fields "$SOURCE" "$@"
 fi

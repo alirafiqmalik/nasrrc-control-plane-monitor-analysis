@@ -26,16 +26,20 @@ PORT="${GSMTAP_PORT:-4729}"
 if [[ "$ANALYZE" == 1 ]]; then
   need_cmd tshark
   PY="$(scat_python)"
-  FIFO="$(mktemp -u -t nasrrc-replay-XXXXXX).pcap"
+  # mktemp -u would only reserve the name without the .pcap suffix, so take a
+  # directory and put the FIFO inside it.
+  WORKDIR="$(mktemp -d -t nasrrc-replay-XXXXXX)"
+  FIFO="$WORKDIR/stream.pcap"
   mkfifo "$FIFO"
-  trap 'rm -f "$FIFO"' EXIT
+  trap 'rm -rf "$WORKDIR"' EXIT
   echo "[*] replaying $SDM into the analyzer (layers=$LAYERS)" >&2
   # SCAT writes a pcap stream into the FIFO; tshark reads it with -r, so no
   # dumpcap and no capture permission are involved.
   scat_cmd -t sec -d "$SDM" -L "$LAYERS" -F "$FIFO" &
   scat_pid=$!
   "$PY" -m nasrrc --fields "$FIFO"
-  wait "$scat_pid"
+  # SCAT dies on SIGPIPE once the analyzer stops reading; that is a normal end.
+  wait "$scat_pid" || true
   exit 0
 fi
 

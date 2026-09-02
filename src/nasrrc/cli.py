@@ -56,6 +56,9 @@ def main(argv: list[str] | None = None) -> int:
         return _emit(events, kinds=args.kinds, as_json=args.json)
     except KeyboardInterrupt:
         return 0
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
+        return 1
     except BrokenPipeError:
         # Downstream `head` or similar closed the pipe; that is a normal stop.
         sys.stdout = None
