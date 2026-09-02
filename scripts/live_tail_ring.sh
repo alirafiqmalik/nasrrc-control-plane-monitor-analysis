@@ -54,6 +54,8 @@ stream_rings() {
     if [[ "$name" != "$last_name" ]]; then
       last_name="$name"
       adb exec-out "su -c 'tail -c +1 -f $ring'" || true
+    else
+      adb_su "start modem_logging_start" || true
     fi
     sleep 1
     ring="$(latest_ring || true)"
@@ -108,7 +110,7 @@ rm -f "$FIFO"
 mkfifo "$FIFO"
 
 echo "[*] live GSMTAP $HOST:$PORT  (stop: Ctrl-C)"
-echo "    tshark -i lo -f 'udp port $PORT' -Y 'lte_rrc || nas-eps || nr-rrc || nas-5gs'"
+echo "    tshark -i lo -f 'udp port $PORT and dst host $HOST' -Y 'lte_rrc || nas-eps || nr-rrc || nas-5gs'"
 
 scat_cmd -t sec -d "$FIFO" -L "$LAYERS" -H "$HOST" -P "$PORT" &
 SCAT_PID=$!

@@ -23,7 +23,7 @@ Done when: `cap.pcap` exists. NAS may be idle if nothing is signalling — that 
 
 ```bash
 # terminal A
-tshark -i lo -f 'udp port 4729' -Y 'lte_rrc || nas-eps || nr-rrc || nas-5gs'
+tshark -i lo -f 'udp port 4729 and dst host 127.0.0.1' -Y 'lte_rrc || nas-eps || nr-rrc || nas-5gs'
 # terminal B
 ./scripts/live_replay_sdm.sh captures/smoke/cap.sdm
 ```
