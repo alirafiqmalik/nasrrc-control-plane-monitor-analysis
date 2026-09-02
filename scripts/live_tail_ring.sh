@@ -33,9 +33,16 @@ HOST="${GSMTAP_HOST:-127.0.0.1}"
 PORT="${GSMTAP_PORT:-4729}"
 LAYERS="${LAYERS:-nas,rrc}"
 FIFO="${FIFO:-/tmp/nasrrc-live.sdm}"
-STARTED_AT="$(adb_su "date +%s")"
 SCAT_PID=""
 TAIL_PID=""
+
+latest_ring() {
+  adb_su "ls -1t /data/vendor/radio/logs/always-on/sbuff_*.sdm /data/vendor/slog/sbuff_*.sdm 2>/dev/null | head -1"
+}
+
+ring_size() {
+  adb_su "stat -c %s '$1'"
+}
 
 cleanup() {
   local status=$?
@@ -59,11 +66,24 @@ echo "[*] enabling modem logging (dmd keeps /dev/umts_dm0)"
 enable_modem_logging
 sleep 3
 
-SBUFF="$(adb_su "ls -1t /data/vendor/radio/logs/always-on/sbuff_[0-9]*.sdm /data/vendor/slog/sbuff_[0-9]*.sdm 2>/dev/null | head -1")"
+SBUFF="$(latest_ring)"
 [ -n "$SBUFF" ] || { echo "no sbuff_*.sdm yet — enable Verbose Vendor Logging?" >&2; exit 1; }
-SBUFF_MTIME="$(adb_su "stat -c %Y '$SBUFF'")"
-if (( SBUFF_MTIME < STARTED_AT )); then
-  echo "newest timestamped ring was not updated after logging was enabled: $SBUFF" >&2
+SBUFF_SIZE="$(ring_size "$SBUFF")"
+RING_GROWING=0
+for _ in {1..10}; do
+  sleep 1
+  CANDIDATE="$(latest_ring)"
+  [[ -n "$CANDIDATE" ]] || continue
+  CANDIDATE_SIZE="$(ring_size "$CANDIDATE")"
+  if [[ "$CANDIDATE" == "$SBUFF" ]] && (( CANDIDATE_SIZE > SBUFF_SIZE )); then
+    RING_GROWING=1
+    break
+  fi
+  SBUFF="$CANDIDATE"
+  SBUFF_SIZE="$CANDIDATE_SIZE"
+done
+if [[ "$RING_GROWING" -ne 1 ]]; then
+  echo "newest ring did not grow after logging was enabled: $SBUFF" >&2
   exit 1
 fi
 echo "[*] ring: $SBUFF"
