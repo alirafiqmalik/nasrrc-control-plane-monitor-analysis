@@ -3,19 +3,19 @@
 # over `adb shell -T`. stdin -> node (SCAT control writes), node -> stdout
 # (the SDM stream). Run as root. Ticket 03; see .scratch/live-analyzer/issues/.
 #
-# The node returns 0 bytes rather than blocking when its queue is empty, so a
-# plain `cat` sees EOF and exits before the modem has answered anything. The
-# reader therefore loops instead of trusting the first EOF.
+# The read half is nasrrc_dm_read.sh, which opens its own descriptor on the
+# node — the node serves every reader, so there is no reason to duplicate the
+# retry loop here. This script only adds the write direction.
 NODE="${1:-/dev/umts_dm0}"
+case "$0" in
+  */*) READER_SCRIPT="${0%/*}/nasrrc_dm_read.sh" ;;
+  *)   READER_SCRIPT="./nasrrc_dm_read.sh" ;;
+esac
 
-exec 3<>"$NODE" || exit 1
-
-while :; do
-  cat <&3
-  sleep 0.02
-done &
+sh "$READER_SCRIPT" "$NODE" &
 READER=$!
 trap 'kill "$READER" 2>/dev/null' EXIT INT TERM
 
+exec 3<>"$NODE" || exit 1
 # Returns when the host closes the connection, which then reaps the reader.
 cat >&3

@@ -45,15 +45,33 @@ still grew 14,685,987 → 20,981,219 bytes. The bytes are bare SDM frames
 (`7f` … `7e`), so SCAT parses them through `run_diag`, and a FIFO named
 `*.sdmraw` is what selects that path (`.sdm` would pick the logger parser).
 
-Proof run, 60 s with dmd untouched: 30 GSMTAP frames — RRC reconfiguration and
+Proof run, 60 s with dmd untouched, ring gate satisfied: 72 GSMTAP frames from
+74,547,085 bytes of SDM — LTE and NR measurement reports, paging, RRC setup and
+release, security mode, UE capability, and **a real handover**: frame 57 is an
+EN-DC `RRCConnectionReconfiguration` carrying `mobilityControlInfo` to target
+PCI 90 with a nested NR `reconfigurationWithSync`, reported once as an LTE
+handover. That is the first handover this repo has seen off a live network
+rather than the synthetic fixture, and it exercises ticket 02's discrimination
+against real data. An earlier 60 s run gave 30 GSMTAP frames — RRC reconfiguration and
 complete, measurement reports, paging, SIB3/4/5/8/15/24, MIB, a detach request
 and a service accept. Arrivals are continuous: median inter-arrival 44 ms,
 longest gap 8.1 s on an idle stationary UE, against the ring path's ~30 s
 rotation cadence. First packet lands ~3 s after the tap attaches.
 
-Two things the node path does not fix: it still needs a DM session running
-(`vendor.sys.modem.logging.status=true`), which is still about one per boot; and
-`sbuff_power_on_log.sdm` still owns the first seconds after boot.
+Two things the node path does not fix: it still needs a live DM session, which
+is still about one per boot; and `sbuff_power_on_log.sdm` still owns the first
+stretch after boot.
+
+`vendor.sys.modem.logging.status` is **not** the readiness signal, and trusting
+it cost four runs. Measured: the property went `true` three seconds after the
+enable, stayed `true` for 80 s, no timestamped ring was ever created, and the
+tap read 0 bytes the whole time — dmd was still filling `sbuff_power_on_log.sdm`
+towards its ~10.5 MB cap. The gate is a session ring under `/data/vendor/slog`;
+`node` waits for one and refuses to run without it. With the ring present the
+same tap delivered 74.5 MB in 60 s.
+
+A dry tap and a decoder that emitted nothing produce an identical empty pcap, so
+`node` now counts the bytes it received and says which happened at stop.
 
 The tap is a shell loop, not one `cat`. The node returns 0 bytes rather than
 blocking when its queue is empty, so a single `cat` sees EOF and exits within

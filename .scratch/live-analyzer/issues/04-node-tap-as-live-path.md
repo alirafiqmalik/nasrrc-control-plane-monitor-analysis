@@ -19,7 +19,9 @@ Do not delete the ring path before this is settled. What is still unproven:
 - [ ] Behaviour across an airplane cycle (`--airplane`) and a modem crash
 - [ ] Whether frames are ever dropped between two `cat` invocations of the loop —
       compare a node capture against the ring for the same window
-- [ ] Whether `sbuff_power_on_log.sdm` still hides the first seconds after boot
+- [x] Whether `sbuff_power_on_log.sdm` still hides the first seconds after boot —
+      it does, for its whole ~10.5 MB. The tap is dry until a session ring
+      exists, which is the gate `node` now waits on
 - [ ] Whether the tap needs modem logging enabled at all, or only a DM session
 
 If it holds, `live_tail_ring.sh` becomes a fallback rather than the default, and

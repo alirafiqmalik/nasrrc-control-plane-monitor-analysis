@@ -14,8 +14,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$SCRIPT_DIR/lib.sh"
 
-SOURCE="${1:-lo}"
-shift || true
+# The source is the first argument that is not an option, so `--kinds cap.pcap`
+# reads as well as `cap.pcap --kinds`. Taking $1 blindly made the former report
+# `--kinds` as the interface, and argparse then failed on the pcap.
+SOURCE=""
+PASSTHROUGH=()
+for arg in "$@"; do
+  if [[ -z "$SOURCE" && "$arg" != -* ]]; then
+    SOURCE="$arg"
+  else
+    PASSTHROUGH+=("$arg")
+  fi
+done
+SOURCE="${SOURCE:-lo}"
+set -- "${PASSTHROUGH[@]+"${PASSTHROUGH[@]}"}"
+
 HOST="${GSMTAP_HOST:-127.0.0.1}"
 PORT="${GSMTAP_PORT:-4729}"
 
