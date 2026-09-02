@@ -22,7 +22,7 @@ case "$1" in
     [[ -f "$FAKE_STATE/rings/${ring##*/}" ]] && cat "$FAKE_STATE/rings/${ring##*/}"
     exec sleep 300 ;;
   shell)
-    if [[ "$all" == *"ls -1t"* ]]; then cat "$FAKE_STATE/current_ring"
+    if [[ "$all" == *"ls -1"* ]]; then cat "$FAKE_STATE/current_ring"
     elif [[ "$all" == *"stat -c %s"* ]]; then
       n=$(( $(cat "$FAKE_STATE/size" 2>/dev/null || echo 0) + 1000 ))
       echo "$n" > "$FAKE_STATE/size"; echo "$n"

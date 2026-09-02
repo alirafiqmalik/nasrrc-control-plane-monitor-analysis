@@ -13,3 +13,5 @@
 
 ## Comments
 Summary-line classification in `src/nasrrc/` is the baseline. This ticket adds a tshark-field or pyshark consumer. Full MobileInsight parity is out of scope.
+
+2026-09-02: ticket 01 is resolved. Offline sample pcaps from that proof are in `captures/ticket01/` (gitignored). NR arrives as GSMTAPv3, so field analyzers that need dissected NR still wait on a v3-aware Wireshark. LTE MIB from the same session does dissect.

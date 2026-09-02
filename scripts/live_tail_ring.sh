@@ -44,14 +44,29 @@ STALL_POLLS="${STALL_POLLS:-15}"
 # wedges it for the rest of the boot, so give up after a few attempts.
 FLUSH_LIMIT="${FLUSH_LIMIT:-3}"
 SCAT_PID=""
-TAIL_PID=""
+STREAM_PID=""
 FOLLOW_PID=""
 # stream_rings runs as a subshell, so its `adb exec-out` pid has to travel back
 # to cleanup through the filesystem rather than through a variable.
 FOLLOW_PID_FILE="${TMPDIR:-/tmp}/nasrrc-live.$$.follow"
 
+ring_name() {
+  printf '%s\n' "${1##*/}"
+}
+
+# Newest timestamped session, by filename. `ls -1t` is mtime order and a ring
+# still being flushed can outrank the session that replaced it. Prefer slog
+# (the live file) over the always-on copy of the same name.
 latest_ring() {
-  adb_su "ls -1t /data/vendor/radio/logs/always-on/sbuff_[0-9]*.sdm /data/vendor/slog/sbuff_[0-9]*.sdm 2>/dev/null | head -1"
+  local listing name
+  listing="$(adb_su "ls -1 /data/vendor/radio/logs/always-on/sbuff_[0-9]*.sdm /data/vendor/slog/sbuff_[0-9]*.sdm 2>/dev/null")"
+  name="$(printf '%s\n' "$listing" | awk -F/ '{print $NF}' | sort | tail -1)"
+  [[ -n "$name" ]] || return 1
+  if printf '%s\n' "$listing" | grep -F -q "/slog/$name"; then
+    printf '%s\n' "/data/vendor/slog/$name"
+  else
+    printf '%s\n' "/data/vendor/radio/logs/always-on/$name"
+  fi
 }
 
 ring_size() {
@@ -90,7 +105,7 @@ stream_rings() {
     # follower monotone. `ls -1t` orders by mtime, and a ring still being
     # flushed can outrank the newer session that replaced it — reattaching
     # backwards would replay its whole multi-MB history as fresh GSMTAP.
-    if [[ "${ring##*/}" > "${current##*/}" ]]; then
+    if [[ "$(ring_name "$ring")" > "$(ring_name "$current")" ]]; then
       if [[ -n "$FOLLOW_PID" ]]; then
         sleep "$DRAIN_SECS"
         kill "$FOLLOW_PID" 2>/dev/null || true
@@ -110,7 +125,7 @@ stream_rings() {
     [[ -n "$next" ]] || continue
     next_size="$(ring_size "$next" 2>/dev/null || true)"
 
-    if [[ -n "$next_size" && "${next##*/}" == "${current##*/}" && "$next_size" == "$size" ]]; then
+    if [[ -n "$next_size" && "$(ring_name "$next")" == "$(ring_name "$current")" && "$next_size" == "$size" ]]; then
       # Same session, readable, and not being written to.
       stalled=$(( stalled + 1 ))
       if (( stalled >= STALL_POLLS )); then
@@ -144,12 +159,12 @@ cleanup() {
   # stream_rings only sees TERM once its `sleep` returns, which can outlast the
   # grace below, so the follower is killed here by the pid it recorded.
   FOLLOW_PID="$(cat "$FOLLOW_PID_FILE" 2>/dev/null || true)"
-  for pid in "$TAIL_PID" "$FOLLOW_PID" "$SCAT_PID"; do
+  for pid in "$STREAM_PID" "$FOLLOW_PID" "$SCAT_PID"; do
     [[ -n "$pid" ]] || continue
     kill "$pid" 2>/dev/null || true
   done
   sleep 1
-  for pid in "$TAIL_PID" "$FOLLOW_PID" "$SCAT_PID"; do
+  for pid in "$STREAM_PID" "$FOLLOW_PID" "$SCAT_PID"; do
     [[ -n "$pid" ]] || continue
     kill -9 "$pid" 2>/dev/null || true
   done
@@ -176,7 +191,7 @@ for _ in {1..10}; do
   CANDIDATE="$(latest_ring)"
   [[ -n "$CANDIDATE" ]] || continue
   CANDIDATE_SIZE="$(ring_size "$CANDIDATE")"
-  if [[ "${CANDIDATE##*/}" != "${SBUFF##*/}" ]] || (( CANDIDATE_SIZE > SBUFF_SIZE )); then
+  if [[ "$(ring_name "$CANDIDATE")" != "$(ring_name "$SBUFF")" ]] || (( CANDIDATE_SIZE > SBUFF_SIZE )); then
     RING_GROWING=1
     SBUFF="$CANDIDATE"
     break
@@ -199,7 +214,7 @@ echo "    tshark -i lo -f 'udp port $PORT and dst host $HOST' -Y 'gsmtap || lte_
 scat_cmd -t sec -d "$FIFO" -L "$LAYERS" -H "$HOST" -P "$PORT" &
 SCAT_PID=$!
 stream_rings "$SBUFF" > "$FIFO" &
-TAIL_PID=$!
+STREAM_PID=$!
 
 if [[ "$AIRPLANE" -eq 1 ]]; then
   sleep 1
@@ -207,4 +222,4 @@ if [[ "$AIRPLANE" -eq 1 ]]; then
   echo "[*] still listening until Ctrl-C"
 fi
 
-wait -n "$SCAT_PID" "$TAIL_PID"
+wait -n "$SCAT_PID" "$STREAM_PID"

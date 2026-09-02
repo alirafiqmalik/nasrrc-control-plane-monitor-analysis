@@ -13,6 +13,6 @@ HOST="${GSMTAP_HOST:-127.0.0.1}"
 PORT="${GSMTAP_PORT:-4729}"
 
 echo "[*] replaying $SDM as GSMTAP $HOST:$PORT (layers=$LAYERS)"
-echo "    listen: tshark -i lo -f 'udp port $PORT' -Y 'lte_rrc || nas-eps || nr-rrc || nas-5gs'"
+echo "    listen: tshark -i lo -f 'udp port $PORT and dst host $HOST' -Y 'gsmtap || lte_rrc || nas-eps || nr-rrc || nas-5gs'"
 # -H is GSMTAP host. -a is USB bus:address — do not pass an IP there.
 scat_cmd -t sec -d "$SDM" -L "$LAYERS" -H "$HOST" -P "$PORT"
