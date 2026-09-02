@@ -73,6 +73,17 @@ ring_size() {
   adb_su "stat -c %s '$1'"
 }
 
+# A ring can rotate away between latest_ring and the stat that follows — routine
+# at the ~9 s interval this device uses. Anything that is not a plain number
+# counts as zero, because letting `set -e` end the run here costs a reboot: the
+# logger allows about one session per boot.
+ring_size_or_zero() {
+  local size
+  size="$(ring_size "$1" 2>/dev/null || true)"
+  [[ "$size" =~ ^[0-9]+$ ]] || size=0
+  printf '%s\n' "$size"
+}
+
 # Kill every remote tail this tool leaves behind. Closing `adb exec-out` locally
 # does not reach the on-device process, so it has to be reaped by name.
 #
@@ -80,8 +91,13 @@ ring_size() {
 # argument in single quotes, so a quoted pattern collapses into `pkill -f tail`
 # on the device — which would match every unrelated `tail` there. Each `.` here
 # stands for one literal character of `tail -c +1 -f /data/vendor/`.
+#
+# Pass a ring path to reap only that one. The bare form sweeps every ring tail on
+# the device, which is what start and stop want but would also cut a concurrent
+# instance's stream, so rotation passes the ring it is leaving.
 reap_remote_tails() {
-  adb_su "pkill -f tail.-c..1.-f./data/vendor/" >/dev/null 2>&1 || true
+  local scope="${1:-/data/vendor/}"
+  adb_su "pkill -f tail.-c..1.-f.${scope}" >/dev/null 2>&1 || true
 }
 
 # Reattach across dmd session rotation. `tail -f` never returns on a ring that
@@ -110,7 +126,7 @@ stream_rings() {
         sleep "$DRAIN_SECS"
         kill "$FOLLOW_PID" 2>/dev/null || true
         wait "$FOLLOW_PID" 2>/dev/null || true
-        reap_remote_tails
+        reap_remote_tails "$current"
       fi
       current="$ring"
       size=""
@@ -121,6 +137,17 @@ stream_rings() {
     fi
 
     sleep "$POLL_SECS"
+
+    # `tail -f` never returns on its own, so a dead follower means something
+    # outside this script killed it — another instance's startup sweep, most
+    # likely. Reattaching is noisy; going quiet with no error is worse.
+    if [[ -n "$FOLLOW_PID" ]] && ! kill -0 "$FOLLOW_PID" 2>/dev/null; then
+      echo "[*] remote tail died — reattaching to the newest ring" >&2
+      wait "$FOLLOW_PID" 2>/dev/null || true
+      FOLLOW_PID=""
+      current=""
+    fi
+
     next="$(latest_ring || true)"
     [[ -n "$next" ]] || continue
     next_size="$(ring_size "$next" 2>/dev/null || true)"
@@ -180,17 +207,17 @@ echo "[*] enabling modem logging (dmd keeps /dev/umts_dm0)"
 reap_remote_tails
 enable_modem_logging
 
-SBUFF="$(latest_ring)"
+SBUFF="$(latest_ring || true)"
 [ -n "$SBUFF" ] || { echo "no sbuff_*.sdm yet — enable Verbose Vendor Logging?" >&2; exit 1; }
-SBUFF_SIZE="$(ring_size "$SBUFF")"
+SBUFF_SIZE="$(ring_size_or_zero "$SBUFF")"
 # Logging is live if the ring grows, or if dmd opens a newer session — under a
 # short rotation interval the ring is replaced before it is ever seen to grow.
 RING_GROWING=0
 for _ in {1..10}; do
   sleep 1
-  CANDIDATE="$(latest_ring)"
+  CANDIDATE="$(latest_ring || true)"
   [[ -n "$CANDIDATE" ]] || continue
-  CANDIDATE_SIZE="$(ring_size "$CANDIDATE")"
+  CANDIDATE_SIZE="$(ring_size_or_zero "$CANDIDATE")"
   if [[ "$(ring_name "$CANDIDATE")" != "$(ring_name "$SBUFF")" ]] || (( CANDIDATE_SIZE > SBUFF_SIZE )); then
     RING_GROWING=1
     SBUFF="$CANDIDATE"
