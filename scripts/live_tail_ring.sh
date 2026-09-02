@@ -37,7 +37,7 @@ SCAT_PID=""
 TAIL_PID=""
 
 latest_ring() {
-  adb_su "ls -1t /data/vendor/radio/logs/always-on/sbuff_*.sdm /data/vendor/slog/sbuff_*.sdm 2>/dev/null | head -1"
+  adb_su "ls -1t /data/vendor/radio/logs/always-on/sbuff_[0-9]*.sdm /data/vendor/slog/sbuff_[0-9]*.sdm 2>/dev/null | head -1"
 }
 
 ring_size() {
@@ -64,7 +64,6 @@ trap 'exit 143' TERM
 
 echo "[*] enabling modem logging (dmd keeps /dev/umts_dm0)"
 enable_modem_logging
-sleep 3
 
 SBUFF="$(latest_ring)"
 [ -n "$SBUFF" ] || { echo "no sbuff_*.sdm yet — enable Verbose Vendor Logging?" >&2; exit 1; }

@@ -9,7 +9,7 @@ MobileInsight parity. No eSIM toggling. Airplane mode is optional (`--airplane`)
 - Rooted Pixel 7a (lynx), Tensor GS201 = Samsung Exynos Modem 5300 (`g5300q`).
 - Diagnostic format is SDM, not Qualcomm DIAG. SCAT `-t sec`.
 - `dmd` holds `/dev/umts_dm0` exclusively. Host SCAT cannot open that node.
-- Always-on ring: `/data/vendor/radio/logs/always-on/sbuff_*.sdm` (also `/data/vendor/slog/`).
+- Active session ring: timestamped `sbuff_[0-9]*.sdm` under `/data/vendor/slog/`, rotated into `/data/vendor/radio/logs/always-on/`. `sbuff_power_on_log.sdm` and `sbuff_profile.sdm` are separate artifacts.
 - Enable logging: `persist.vendor.verbose_logging_enabled=true` (plus the shannon/modem logging props the capture script sets).
 
 ## Pipeline
