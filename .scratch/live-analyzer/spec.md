@@ -8,7 +8,7 @@ MobileInsight parity. No eSIM toggling. Airplane mode is optional (`--airplane`)
 
 - Rooted Pixel 7a (lynx), Tensor GS201 = Samsung Exynos Modem 5300 (`g5300q`).
 - Diagnostic format is SDM, not Qualcomm DIAG. SCAT `-t sec`.
-- `dmd` holds `/dev/umts_dm0` exclusively. Host SCAT cannot open that node.
+- `dmd` holds `/dev/umts_dm0`, but not exclusively: the node mirrors its stream to a second reader (ticket 03). A read-only tap over adb feeds SCAT the raw SDM directly; the host still cannot open the node itself.
 - Active session ring: timestamped `sbuff_[0-9]*.sdm` under `/data/vendor/slog/`, rotated into `/data/vendor/radio/logs/always-on/`. `sbuff_power_on_log.sdm` and `sbuff_profile.sdm` are separate artifacts.
 - Enable logging: `persist.vendor.verbose_logging_enabled=true` (plus the shannon/modem logging props the capture script sets).
 
@@ -27,7 +27,7 @@ Offline variant writes a pcap (`-F`) instead of UDP.
 - `-H` / `-P` select GSMTAP host/port. `-a` is USB bus:address, not an IP.
 - Filename containing `.sdm` → `run_logger` (always-on logger wrapping). Anything else (including `/dev/stdin`) → raw SDM `run_diag`.
 - FileIO sets `block_until_data=False`, so a regular file is read once to EOF. A FIFO stays open while the writer (`tail -f`) lives, which is the intended live dump path.
-- Serial `-s /dev/umts_dm0` is the on-device true-realtime path. It also runs `init_diag` and fights `dmd`. That experiment is a later ticket, on the phone or via USB DM, not a host open of the char node.
+- Serial `-s` against the DM node is a dead end (ticket 03). `init_diag` reaches the modem and the modem does not answer: dmd starts the DM session over the vendor RIL path, not by writing SDM control frames. Read the node instead — `-d <fifo>.sdmraw` — and let dmd keep its session.
 
 ## Events (first cut)
 
