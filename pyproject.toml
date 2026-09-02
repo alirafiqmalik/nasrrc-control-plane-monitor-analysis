@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nasrrc"
+version = "0.1.0"
+description = "NAS/RRC control-plane event classifier for Shannon SDM captures"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+decode = ["signalcat>=2.0.0"]
+
+[project.scripts]
+nasrrc-analyze = "nasrrc.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

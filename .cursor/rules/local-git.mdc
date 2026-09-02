@@ -1,0 +1,27 @@
+---
+description: Local git — one commit per finished piece of work so progress is traceable
+alwaysApply: true
+---
+
+# Local git
+
+This repo is **local-only** until the user asks for a remote or a push.
+
+After every finished piece of work (a user request, a ticket, a vertical slice), create a git commit before stopping. Do not leave a completed slice uncommitted. Do not batch unrelated slices into one commit.
+
+## Steps
+
+1. If `.git` is missing, `git init` in the repo root.
+2. `git status` and `git diff`. Stage only the files for this slice.
+3. Refuse `.sdm`, `.pcap`, `.pcapng`, `.qmdl`, `.venv/`, `.env`, and other subscriber dumps or secrets. They stay gitignored.
+4. Commit with Conventional Commits, imperative, why not what. No AI attribution.
+
+```
+feat(live): stream the dmd ring until Ctrl-C
+
+Airplane is opt-in so the default run does not poke the radio.
+```
+
+5. `git status` after the commit. Stop there — no push, no force, no amend of published history, no `--no-verify`.
+
+Empty commits are not progress. If nothing changed, do not commit.
