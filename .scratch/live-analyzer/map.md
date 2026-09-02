@@ -15,7 +15,7 @@
 - Keep the repo simple (ADR-0001).
 - Handover vs generic reconfiguration is deferred to dissected-field analyzers (ticket 02).
 - 2026-09-02 device proof stopped at the first gate: both modem logging enable properties became `true`, but `vendor.sys.modem.logging.status` stayed `false`, no `dmd` process opened `/dev/umts_dm0`, and the newest timestamped ring (`/data/vendor/radio/logs/always-on/sbuff_20260901230105.sdm`) remained at 6,016,827 bytes with a 2026-09-01 23:01:09 mtime. Android init showed the logging-control services running; the kernel reported that `umts_dm0` was not open. The props were restored to `false`. A reboot or a successful on-device Verbose Vendor Logging toggle is needed before the remaining proof can run.
-- The same attempt confirmed that a FIFO named `.sdm` enters SCAT's logger path (`read_dump` → `run_logger`), rather than raw SDM. It decoded the stale `sbuff_power_on_log.sdm`, but that does not prove live delivery. Host tshark needs `lte_rrc` (underscore) on this installation and needs elevated capture permission. Latency is not measurable until the ring grows.
+- The same attempt confirmed that a FIFO named `.sdm` enters SCAT's logger path (`read_dump` → `run_logger`), rather than raw SDM. It decoded the stale `sbuff_power_on_log.sdm`, but that does not prove live delivery. Host tshark needs `lte_rrc` (underscore) on this installation and needs elevated capture permission. Latency and startup-frame integrity (truncation or garbling) are not measurable until the ring grows.
 
 ## Fog
 
