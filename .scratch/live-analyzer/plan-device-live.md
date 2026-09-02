@@ -23,7 +23,7 @@ Done when: `cap.pcap` exists. NAS may be idle if nothing is signalling — that 
 
 ```bash
 # terminal A
-tshark -i lo -f 'udp port 4729' -Y 'lte-rrc || nas-eps || nr-rrc || nas-5gs'
+tshark -i lo -f 'udp port 4729' -Y 'lte_rrc || nas-eps || nr-rrc || nas-5gs'
 # terminal B
 ./scripts/live_replay_sdm.sh captures/smoke/cap.sdm
 ```
@@ -34,7 +34,7 @@ Skip if there is no dump; use `fixtures/example-lte/` for the classifier only.
 
 ```bash
 ./scripts/live_tail_ring.sh
-# other terminal: tshark as above
+# other terminal: tshark as above (use sudo if dumpcap lacks capture permission)
 # optional later: ./scripts/live_tail_ring.sh --airplane
 ```
 
